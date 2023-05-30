@@ -16,7 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io/ioutil"
+	"io"
 	"mime/quotedprintable"
 	"net/smtp"
 	"os"
@@ -90,7 +90,7 @@ func (e *Emailer) loadTemplate() (*template.Template, error) {
 	// If the file exists, use it.
 	_, err := os.Stat(override)
 	if !os.IsNotExist(err) {
-		content, err = ioutil.ReadFile(override)
+		content, err = os.ReadFile(override)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read %s: %s", override, err.Error())
 		}
@@ -101,8 +101,9 @@ func (e *Emailer) loadTemplate() (*template.Template, error) {
 	//
 	funcMap := template.FuncMap{
 		"env":            env,
-		"quoteprintable": e.toQuotedPrintable,
+		"quoteprintable": toQuotedPrintable,
 		"split":          split,
+		"encodeHeader":   encodeHeader,
 	}
 
 	tmpl := template.Must(template.New("email.tmpl").Funcs(funcMap).Parse(string(content)))
@@ -115,7 +116,7 @@ func (e *Emailer) loadTemplate() (*template.Template, error) {
 // body.
 //
 // NOTE: We use this function both directly, and from within our template.
-func (e *Emailer) toQuotedPrintable(s string) (string, error) {
+func toQuotedPrintable(s string) (string, error) {
 	var ac bytes.Buffer
 	w := quotedprintable.NewWriter(&ac)
 	_, err := w.Write([]byte(s))
@@ -127,6 +128,18 @@ func (e *Emailer) toQuotedPrintable(s string) (string, error) {
 		return "", err
 	}
 	return ac.String(), nil
+}
+
+// Encode email header entries to comply with the 7bit ASCII restriction
+// of RFC 5322 according to RFC 2047.
+//
+// We use quotedprintable encoding only if necessary.
+func encodeHeader(s string) string {
+	se, err := toQuotedPrintable(s)
+	if (err != nil) || (len(se) == len(s)) {
+		return s
+	}
+	return "=?utf-8?Q?" + strings.Replace(strings.Replace(se, "?", "=3F", -1), " ", "=20", -1) + "?="
 }
 
 // Sendmail is a simple function that emails the given address.
@@ -186,11 +199,11 @@ func (e *Emailer) Sendmail(addresses []string, textstr string, htmlstr string) e
 
 		// The real meat of the mail is the text & HTML
 		// parts.  They need to be encoded, unconditionally.
-		x.Text, err = e.toQuotedPrintable(textstr)
+		x.Text, err = toQuotedPrintable(textstr)
 		if err != nil {
 			return err
 		}
-		x.HTML, err = e.toQuotedPrintable(html.UnescapeString(htmlstr))
+		x.HTML, err = toQuotedPrintable(html.UnescapeString(htmlstr))
 		if err != nil {
 			return err
 		}
@@ -324,7 +337,7 @@ func (e *Emailer) sendSendmail(addr string, content []byte) error {
 	//
 	// Read the output of Sendmail.
 	//
-	_, err = ioutil.ReadAll(stdout)
+	_, err = io.ReadAll(stdout)
 	if err != nil {
 		fmt.Printf("Error reading mail output: %s\n", err.Error())
 		return nil
