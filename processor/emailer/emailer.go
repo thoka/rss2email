@@ -139,7 +139,9 @@ func encodeHeader(s string) string {
 	if (err != nil) || (len(se) == len(s)) {
 		return s
 	}
-	return "=?utf-8?Q?" + strings.Replace(strings.Replace(se, "?", "=3F", -1), " ", "=20", -1) + "?="
+	se = strings.Replace(strings.Replace(se, "?", "=3F", -1), " ", "=20", -1)
+	se = strings.Replace(se, "=\r\n", "", -1) // remove soft line breaks
+	return "=?utf-8?Q?" + se + "?="
 }
 
 // Sendmail is a simple function that emails the given address.
